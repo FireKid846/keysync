@@ -96,15 +96,35 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
         addEventDown(pointerID, position.x, position.y)
     }
 
+    // Holds only the latest pointer-move target per pointer. Newer calls overwrite
+    // the old target instead of queueing a separate task for every mouse delta.
+    private val latestMoveTarget = java.util.concurrent.ConcurrentHashMap<Int, Offset>()
+    private val moveDraining = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+
     override fun updatePointerPosition(pointerID: Int, position: Offset) {
+        latestMoveTarget[pointerID] = position
+        // If a drain loop is already running for this pointer, it will pick up
+        // this new target on its next iteration — no need to start another one.
+        if (moveDraining[pointerID] == true) return
+        moveDraining[pointerID] = true
+
         scope.launch {
             taskQueue.send {
-                eventManager.offsetPointer(pointerID, position)
-                val event = eventManager.createMotionEvent(MotionEvent.ACTION_MOVE)
-                event?.let {
-                    inject(it)
-                    it.recycle()
+                while (true) {
+                    val target = latestMoveTarget[pointerID] ?: break
+                    eventManager.offsetPointer(pointerID, target)
+                    val event = eventManager.createMotionEvent(MotionEvent.ACTION_MOVE)
+                    event?.let {
+                        inject(it)
+                        it.recycle()
+                    }
+                    // Only stop if nothing newer arrived while we were injecting.
+                    if (latestMoveTarget[pointerID] == target) {
+                        latestMoveTarget.remove(pointerID)
+                        break
+                    }
                 }
+                moveDraining[pointerID] = false
             }
         }
     }
