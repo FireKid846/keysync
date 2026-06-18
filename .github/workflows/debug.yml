@@ -33,7 +33,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug -PstoreFile=dummy.jks -PstorePassword=dummy -PkeyAlias=dummy -PkeyPassword=dummy
 
       - name: Rename APK with version
         run: |
